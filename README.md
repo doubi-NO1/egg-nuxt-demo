@@ -4,7 +4,7 @@
 A simple demo for [egg-nuxt-lib](https://github.com/doubi-NO1/egg-nuxt).
 
 ## Online demo
-[http://egg-nuxt.demos.party/](http://egg-nuxt.demos.party/)
+Please visit [http://egg-nuxt.demos.party/](http://egg-nuxt.demos.party).
 
 ## QuickStart
 ```bash
