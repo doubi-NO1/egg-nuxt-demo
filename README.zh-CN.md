@@ -11,3 +11,4 @@ $ cd egg-nuxt-demo
 $ npm install
 $ npm run dev
 ```
+打开浏览器输入地址[http://127.0.0.1:7997/](http://127.0.0.1:7997/)查看效果
