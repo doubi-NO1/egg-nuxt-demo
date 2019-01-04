@@ -1,4 +1,3 @@
-import 'es6-promise/auto'
 import Vue from 'vue'
 import Meta from 'vue-meta'
 import { createRouter } from './router.js'
@@ -8,11 +7,9 @@ import NuxtLink from './components/nuxt-link.js'
 import NuxtError from '../resources/layouts/error.vue'
 import Nuxt from './components/nuxt.js'
 import App from './App.js'
-import { setContext, getLocation, getRouteData } from './utils'
-
+import { setContext, getLocation, getRouteData, normalizeError } from './utils'
 
 /* Plugins */
-
 
 // Component: <no-ssr>
 Vue.component(NoSSR.name, NoSSR)
@@ -36,21 +33,20 @@ Vue.use(Meta, {
 
 const defaultTransition = {"name":"page","mode":"out-in","appear":false,"appearClass":"appear","appearActiveClass":"appear-active","appearToClass":"appear-to"}
 
-async function createApp (ssrContext) {
-  const router = createRouter(ssrContext)
-
-  
+async function createApp(ssrContext) {
+  const router = await createRouter(ssrContext)
 
   // Create Root instance
+
   // here we inject the router and store to all child components,
   // making them available everywhere as `this.$router` and `this.$store`.
   const app = {
     router,
-    
+
     nuxt: {
       defaultTransition,
       transitions: [ defaultTransition ],
-      setTransitions (transitions) {
+      setTransitions(transitions) {
         if (!Array.isArray(transitions)) {
           transitions = [ transitions ]
         }
@@ -69,21 +65,21 @@ async function createApp (ssrContext) {
       },
       err: null,
       dateErr: null,
-      error (err) {
+      error(err) {
         err = err || null
         app.context._errored = !!err
-        if (typeof err === 'string') err = { statusCode: 500, message: err }
+        err = err ? normalizeError(err) : null
         const nuxt = this.nuxt || this.$options.nuxt
         nuxt.dateErr = Date.now()
         nuxt.err = err
-        // Used in lib/server.js
+        // Used in src/server.js
         if (ssrContext) ssrContext.nuxt.error = err
         return err
       }
     },
     ...App
   }
-  
+
   const next = ssrContext ? ssrContext.next : location => app.router.push(location)
   // Resolve route
   let route
@@ -99,41 +95,14 @@ async function createApp (ssrContext) {
     route,
     next,
     error: app.nuxt.error.bind(app),
-    
+
     payload: ssrContext ? ssrContext.payload : undefined,
     req: ssrContext ? ssrContext.req : undefined,
     res: ssrContext ? ssrContext.res : undefined,
     beforeRenderFns: ssrContext ? ssrContext.beforeRenderFns : undefined
   })
 
-  const inject = function (key, value) {
-    if (!key) throw new Error('inject(key, value) has no key provided')
-    if (!value) throw new Error('inject(key, value) has no value provided')
-    key = '$' + key
-    // Add into app
-    app[key] = value
-    
-    // Check if plugin not already installed
-    const installKey = '__nuxt_' + key + '_installed__'
-    if (Vue[installKey]) return
-    Vue[installKey] = true
-    // Call Vue.use() to install the plugin into vm
-    Vue.use(() => {
-      if (!Vue.prototype.hasOwnProperty(key)) {
-        Object.defineProperty(Vue.prototype, key, {
-          get () {
-            return this.$root.$options[key]
-          }
-        })
-      }
-    })
-  }
-
-  
-
   // Plugin execution
-  
-  
 
   // If server-side, wait for async component to be resolved first
   if (process.server && ssrContext && ssrContext.url) {
@@ -154,8 +123,8 @@ async function createApp (ssrContext) {
 
   return {
     app,
-    router,
-    
+
+    router
   }
 }
 

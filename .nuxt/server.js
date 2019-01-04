@@ -1,19 +1,18 @@
-import Vue from 'vue'
-import clone from 'clone'
 import { stringify } from 'querystring'
-import { omit } from 'lodash'
+import Vue from 'vue'
+import omit from 'lodash/omit'
 import middleware from './middleware'
-import { createApp, NuxtError } from './index'
 import { applyAsyncData, sanitizeComponent, getMatchedComponents, getContext, middlewareSeries, promisify, urlJoin } from './utils'
+import { createApp, NuxtError } from './index'
 
 const debug = require('debug')('nuxt:render')
 debug.color = 4 // force blue color
 
-const isDev = false
+const isDev = true
 
-const noopApp = () => new Vue({ render: (h) => h('div') })
+const noopApp = () => new Vue({ render: h => h('div') })
 
-const createNext = ssrContext => opts => {
+const createNext = ssrContext => (opts) => {
   ssrContext.redirected = opts
   // If nuxt generate
   if (!ssrContext.res) {
@@ -22,8 +21,9 @@ const createNext = ssrContext => opts => {
   }
   opts.query = stringify(opts.query)
   opts.path = opts.path + (opts.query ? '?' + opts.query : '')
-  if (opts.path.indexOf('http') !== 0 && ('/' !== '/' && opts.path.indexOf('/') !== 0)) {
-    opts.path = urlJoin('/', opts.path)
+  const routerBase = '/'
+  if (!opts.path.startsWith('http') && (routerBase !== '/' && !opts.path.startsWith(routerBase))) {
+    opts.path = urlJoin(routerBase, opts.path)
   }
   // Avoid loop redirect
   if (opts.path === ssrContext.url) {
@@ -41,13 +41,13 @@ const createNext = ssrContext => opts => {
 // state of our application before actually rendering it.
 // Since data fetching is async, this function is expected to
 // return a Promise that resolves to the app instance.
-export default async ssrContext => {
+export default async (ssrContext) => {
   // Create ssrContext.next for simulate next() of beforeEach() when wanted to redirect
   ssrContext.redirected = false
   ssrContext.next = createNext(ssrContext)
   // Used for beforeNuxtRender({ Components, nuxtState })
   ssrContext.beforeRenderFns = []
-  // Nuxt object (window.__NUXT__)
+  // Nuxt object (window{{globals.context}}, defaults to window.__NUXT__)
   ssrContext.nuxt = { layout: 'default', data: [], error: null, serverRendered: true }
   // Create the app definition and the instance (created for each request)
   const { app, router } = await createApp(ssrContext)
@@ -60,12 +60,11 @@ export default async ssrContext => {
 
   const beforeRender = async () => {
     // Call beforeNuxtRender() methods
-    await Promise.all(ssrContext.beforeRenderFns.map((fn) => promisify(fn, { Components, nuxtState: ssrContext.nuxt })))
-    
+    await Promise.all(ssrContext.beforeRenderFns.map(fn => promisify(fn, { Components, nuxtState: ssrContext.nuxt })))
   }
   const renderErrorPage = async () => {
     // Load layout for error page
-    let errLayout = (typeof NuxtError.layout === 'function' ? NuxtError.layout(app.context) : NuxtError.layout)
+    const errLayout = (typeof NuxtError.layout === 'function' ? NuxtError.layout(app.context) : NuxtError.layout)
     ssrContext.nuxt.layout = errLayout || 'default'
     await _app.loadLayout(errLayout)
     _app.setLayout(errLayout)
@@ -73,16 +72,14 @@ export default async ssrContext => {
     return _app
   }
   const render404Page = () => {
-    app.context.error({ statusCode: 404, path: ssrContext.url, message: 'This page could not be found' })
+    app.context.error({ statusCode: 404, path: ssrContext.url, message: `This page could not be found` })
     return renderErrorPage()
   }
 
-  
+  const s = isDev && Date.now()
 
   // Components are already resolved by setContext -> getRouteData (app/utils.js)
   const Components = getMatchedComponents(router.match(ssrContext.url))
-
-  
 
   /*
   ** Call global middleware (nuxt.config.js)
@@ -106,8 +103,8 @@ export default async ssrContext => {
   let layout = Components.length ? Components[0].options.layout : NuxtError.layout
   if (typeof layout === 'function') layout = layout(app.context)
   await _app.loadLayout(layout)
+  if (ssrContext.nuxt.error) return renderErrorPage()
   layout = _app.setLayout(layout)
-  // ...Set layout to __NUXT__
   ssrContext.nuxt.layout = _app.layoutName
 
   /*
@@ -136,15 +133,27 @@ export default async ssrContext => {
   ** Call .validate()
   */
   let isValid = true
-  Components.forEach((Component) => {
-    if (!isValid) return
-    if (typeof Component.options.validate !== 'function') return
-    isValid = Component.options.validate({
-      params: app.context.route.params || {},
-      query: app.context.route.query  || {},
-      
+  try {
+    for (const Component of Components) {
+      if (typeof Component.options.validate !== 'function') {
+        continue
+      }
+
+      isValid = await Component.options.validate(app.context)
+
+      if (!isValid) {
+        break
+      }
+    }
+  } catch (validationError) {
+    // ...If .validate() threw an error
+    app.context.error({
+      statusCode: validationError.statusCode || '500',
+      message: validationError.message
     })
-  })
+    return renderErrorPage()
+  }
+
   // ...If .validate() returned false
   if (!isValid) {
     // Don't server-render the page in generate mode
@@ -157,13 +166,13 @@ export default async ssrContext => {
   if (!Components.length) return render404Page()
 
   // Call asyncData & fetch hooks on components matched by the route.
-  let asyncDatas = await Promise.all(Components.map(Component => {
-    let promises = []
+  const asyncDatas = await Promise.all(Components.map((Component) => {
+    const promises = []
 
     // Call asyncData(context)
     if (Component.options.asyncData && typeof Component.options.asyncData === 'function') {
-      let promise = promisify(Component.options.asyncData, app.context)
-      promise.then(asyncDataResult => {
+      const promise = promisify(Component.options.asyncData, app.context)
+      promise.then((asyncDataResult) => {
         ssrContext.asyncData[Component.cid] = asyncDataResult
         applyAsyncData(Component)
         return asyncDataResult
@@ -176,15 +185,14 @@ export default async ssrContext => {
     // Call fetch(context)
     if (Component.options.fetch) {
       promises.push(Component.options.fetch(app.context))
-    }
-    else {
+    } else {
       promises.push(null)
     }
 
     return Promise.all(promises)
   }))
 
-  
+  if (asyncDatas.length) debug('Data fetching ' + ssrContext.url + ': ' + (Date.now() - s) + 'ms')
 
   // datas are the first row of each
   ssrContext.nuxt.data = asyncDatas.map(r => r[0] || {})
